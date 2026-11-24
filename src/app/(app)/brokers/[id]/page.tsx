@@ -3,9 +3,8 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/session";
 import { can } from "@/lib/rbac/can";
-import { PageHeader, StatusBadge, LinkTabs, DL, EmptyState } from "@/components/app/page";
+import { PageHeader, StatusBadge, LinkTabs, DL } from "@/components/app/page";
 import { Card, CardContent } from "@/components/ui/card";
-import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { FormDialog } from "@/components/app/form-dialog";
 import { ConfirmAction } from "@/components/app/confirm-action";
 import { DocumentsPanel } from "@/components/app/documents-panel";
@@ -20,7 +19,6 @@ import { brokerFields } from "@/components/forms/crm-fields";
 import { brokerageOptions } from "@/server/queries/options";
 import { label } from "@/lib/labels";
 import { dayInput, formatDateTime, formatDay } from "@/lib/format";
-import { formatPeso } from "@/lib/money";
 import { formatPhMobile } from "@/lib/normalize";
 import { fullName } from "@/lib/utils";
 

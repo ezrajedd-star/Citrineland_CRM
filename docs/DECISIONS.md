@@ -33,3 +33,24 @@ Decisions made where the build prompt was ambiguous. Simplest option consistent 
 | 27 | Web leads | `POST /api/public/leads`: per-IP rate limit (Settings), Cloudflare Turnstile CAPTCHA (skipped if no secret is configured), hidden honeypot field, CORS allow-list, UTM capture (`utm_campaign` ↔ `Campaign.code`). If an open lead already has the same email or mobile, the inquiry is logged on that lead instead of creating a duplicate. A hosted iframe form lives at `/f/lead`. | Keeps the pipeline clean of web duplicates. |
 | 28 | Sequences | Steps are sent from the lead owner's Outlook (falls back to the enrolling user). Open tracking isn't available via Graph, so performance shows sends, replies and reply rate. Every email includes an unsubscribe link (`/unsubscribe/<token>`) that sets `doNotEmail` and stops all sequences. | Delegated Graph permissions only. |
 | 29 | Notification email | Opted-in users get their notifications emailed *from their own mailbox to themselves* (delegated `Mail.Send`), avoiding an application-level send permission. | Least privilege. |
+| 30 | Data privacy | Consent checkbox + timestamp on leads/clients (required on the web form). KYC documents need `kyc:view`; every download (and denied attempt) is audited. Admin → Data privacy exports a client's data as JSON or anonymizes them (personal data replaced, KYC files removed, financial records kept for retention); blocked while the client has an active transaction. | RA 10173 spirit with accounting retention. |
+| 31 | Backups | Managed Database backups are relied on when using DO Managed PostgreSQL. The Compose `backup` service (profile `localdb`) does nightly `pg_dump` → Spaces with 30-day retention for self-hosted Postgres. | Spec §10. |
+| 32 | Tests | Integration and E2E tests run against the seeded database and create (then cancel) their own transactions; run them against a disposable database, not production. | Realistic coverage of locking and UI flows. |
+
+## Items needing Citrineland's input
+
+These are configurable in the app but the values in the seed are placeholders:
+
+1. **VAT treatment** — whether list prices include VAT, the current BIR residential VAT-exemption thresholds per unit type, and whether parking is always VATable (Admin → Settings → VAT).
+2. **Misc. fees / other charges** — percentage and whether it is part of the TCP (Settings).
+3. **Default loan rates and terms** for bank, Pag-IBIG and in-house estimates (Settings).
+4. **Payment schemes** per development: reservation fees, DP %, DP months, spot-DP discount, in-house rate/term (Admin → Payment schemes).
+5. **Commission rules** — rate, NSP vs TCP basis, brokerage/agent split, release tranches and milestones, per development/brokerage (Admin → Commission rules). Who receives payment (brokerage only vs split) also affects the future NetSuite vendor bills.
+6. **Documentation checklist** — exact required documents, due days, and which apply to bank / Pag-IBIG / in-house buyers (Admin → Document checklist).
+7. **Pipeline stages, lost reasons and lead sources** (Admin → Pipeline stages, Picklists).
+8. **Hold duration** (default 48h) and **parking ownership rule** (default on).
+9. **Quotas** per staff/broker/brokerage.
+10. **Legal review** of the Maceda Law helper wording and of the computation disclaimer text.
+11. **Branding** — replace the logo placeholder (`src/components/app/logo.tsx`, `src/config/brand.ts`).
+12. **Microsoft 365** — tenant ID, app registration, internal email domains for capture filtering.
+13. **NetSuite** — open questions listed in `docs/NETSUITE_INTEGRATION_PLAN.md`.
