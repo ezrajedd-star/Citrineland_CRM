@@ -4,6 +4,7 @@ import argon2 from "argon2";
 import { DEFAULT_ROLES, type SystemRoleKey } from "../src/lib/rbac/permissions";
 import { DEFAULT_SETTINGS } from "../src/lib/settings";
 import { seedDemo } from "./seed-demo";
+import { seedConfig } from "./seed-config";
 
 const prisma = new PrismaClient();
 
@@ -21,6 +22,9 @@ async function main() {
 
   console.log("Seeding settings…");
   await prisma.setting.upsert({ where: { key: "app" }, create: { key: "app", value: DEFAULT_SETTINGS as any }, update: {} });
+
+  console.log("Seeding configuration (stages, picklists, checklist)…");
+  await seedConfig(prisma);
 
   const adminEmail = (process.env.BOOTSTRAP_ADMIN_EMAIL ?? "admin@citrineland.test").toLowerCase();
   const adminPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD;
