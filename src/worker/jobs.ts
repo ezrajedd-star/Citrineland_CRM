@@ -7,6 +7,8 @@ import { SYSTEM_CTX } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
 import { expireHolds, notifyHoldsNearingExpiry } from "@/server/holds";
 import { applyDuePriceLists } from "@/server/price-lists";
+import { syncAllMailboxes, syncAllCalendars, emailPendingNotifications } from "@/server/graph/sync";
+import { graphConfigured } from "@/server/graph/client";
 
 export type JobHandler = (data: any) => Promise<unknown>;
 
@@ -30,5 +32,20 @@ export const JOBS: Record<string, { handler: JobHandler; cron?: string; descript
     cron: "5 0 * * *",
     description: "Apply future-dated price list versions on their effective date",
     handler: async () => applyDuePriceLists(SYSTEM_CTX),
+  },
+  "graph.mail-sync": {
+    cron: "*/5 * * * *",
+    description: "Capture Outlook emails with known leads/clients/brokers onto timelines",
+    handler: async () => (graphConfigured() ? syncAllMailboxes() : 0),
+  },
+  "graph.calendar-sync": {
+    cron: "*/15 * * * *",
+    description: "Log Outlook meetings with known contacts as activities",
+    handler: async () => (graphConfigured() ? syncAllCalendars() : 0),
+  },
+  "notifications.email": {
+    cron: "*/5 * * * *",
+    description: "Email in-app notifications to users who opted in (via their own Outlook)",
+    handler: async () => (graphConfigured() ? emailPendingNotifications() : 0),
   },
 };

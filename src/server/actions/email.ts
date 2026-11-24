@@ -28,8 +28,10 @@ export const sendEmail = action(null, composeEmailSchema, async (input, ctx) => 
   }
   const r = await sendMailAs(ctx.userId, { to: input.to, cc: input.cc, subject: input.subject, html: input.bodyHtml, attachments });
   if (!r.ok) throw new DomainError(r.error);
+  const entity = input.leadId ? `lead:${input.leadId}` : input.clientId ? `client:${input.clientId}` : input.brokerId ? `broker:${input.brokerId}` : null;
   await logActivity({
     type: "EMAIL_OUT",
+    externalKey: r.internetMessageId && entity ? `mail:${r.internetMessageId}:${entity}` : null,
     subject: input.subject,
     body: input.bodyHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 500),
     actorId: ctx.userId,
@@ -37,7 +39,7 @@ export const sendEmail = action(null, composeEmailSchema, async (input, ctx) => 
     clientId: input.clientId,
     brokerId: input.brokerId,
     transactionId: input.transactionId,
-    meta: { participants: `To: ${input.to.join(", ")}${input.cc.length ? ` · Cc: ${input.cc.join(", ")}` : ""}`, attachments: attachments.map((a) => a.name), sentViaCrm: true },
+    meta: { webLink: r.webLink, participants: `To: ${input.to.join(", ")}${input.cc.length ? ` · Cc: ${input.cc.join(", ")}` : ""}`, attachments: attachments.map((a) => a.name), sentViaCrm: true },
   });
   if (input.computationId) await prisma.sampleComputation.update({ where: { id: input.computationId }, data: { sentAt: new Date() } });
   await audit(ctx, { entity: "Email", entityId: input.leadId ?? input.clientId ?? input.brokerId ?? input.transactionId ?? "-", action: "send", after: { to: input.to, subject: input.subject, computationId: input.computationId } });
