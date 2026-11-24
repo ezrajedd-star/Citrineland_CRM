@@ -108,7 +108,7 @@ export function EntityForm({
                   {f.required && <span className="text-red-600"> *</span>}
                 </Label>
               )}
-              {renderControl(f, id, register, control, !!err)}
+              {f.type !== "checkbox" && renderControl(f, id, register, control, !!err)}
               {f.help && !err && <p className="text-xs text-muted-foreground">{f.help}</p>}
               {err && <p className="text-xs text-red-600">{err}</p>}
             </div>

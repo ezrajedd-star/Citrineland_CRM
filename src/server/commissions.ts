@@ -68,7 +68,8 @@ export async function evaluateTranches(tx: Tx, transactionId: string, ctx: Actor
   const t = ledger.transaction;
   const paid = await tx.payment.aggregate({ where: { transactionId, voidedAt: null }, _sum: { amountCents: true } });
   const pricing = (t.pricingSnapshot ?? {}) as any;
-  const dp = pricing.schemeKind === "DP_BALANCE" ? Number(t.downpaymentCents) : Number(t.tcpCents);
+  // DP milestone = what the buyer actually owes for the DP (gross DP less any spot-DP discount)
+  const dp = pricing.schemeKind === "DP_BALANCE" ? Number(t.downpaymentCents) - Number(pricing.spotDpDiscountCents ?? 0) : Number(t.tcpCents) - Number(pricing.spotDpDiscountCents ?? 0);
   const r = evaluateTrancheStatuses(
     ledger.tranches.map((x) => ({ id: x.id, status: x.status, milestoneType: x.milestoneType, milestoneValue: x.milestoneValue })),
     { status: t.status as TxStatus, collectedCents: Number(paid._sum.amountCents ?? 0n), tcpCents: Number(t.tcpCents), dpCents: dp },
