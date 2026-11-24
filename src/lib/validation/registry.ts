@@ -15,6 +15,7 @@ export const formSchemas = {
   paymentScheme: S.paymentSchemeSchema,
   hold: S.holdSchema,
   block: S.blockSchema,
+  priceChange: S.priceChangeSchema,
   brokerage: S.brokerageSchema,
   broker: S.brokerSchema,
   lead: S.leadSchema,

@@ -97,9 +97,10 @@ export const zOptId = z
   .transform((v) => (v ? v : null));
 export const zIds = z.preprocess((v) => (Array.isArray(v) ? v : v ? [v] : []), z.array(z.string().min(1)));
 
-export function zEnumReq<T extends [string, ...string[]]>(values: T, label = "This field") {
-  return z.enum(values, { errorMap: () => ({ message: `Select ${label.toLowerCase()}` }) });
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+export function zEnumReq<const T extends readonly [string, ...string[]]>(values: T, label = "This field") {
+  return z.enum(values as unknown as Mutable<T>, { errorMap: () => ({ message: `Select ${label.toLowerCase()}` }) });
 }
-export function zEnumOpt<T extends [string, ...string[]]>(values: T) {
-  return z.preprocess(emptyToNull, z.enum(values).nullable());
+export function zEnumOpt<const T extends readonly [string, ...string[]]>(values: T) {
+  return z.preprocess(emptyToNull, z.enum(values as unknown as Mutable<T>).nullable());
 }

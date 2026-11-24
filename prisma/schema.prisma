@@ -415,6 +415,8 @@ model PriceList {
   development   Development     @relation(fields: [developmentId], references: [id])
   version       Int
   effectiveDate DateTime        @db.Date
+  /// Set when the prices were copied to Unit/ParkingSlot.listPriceCents (on/after effective date)
+  appliedAt     DateTime?
   notes         String?
   createdById   String?
   createdAt     DateTime        @default(now())
@@ -699,6 +701,7 @@ model Lead {
   @@index([email])
   @@index([mobile])
   @@index([normalizedName])
+  @@index([normalizedName(ops: raw("gin_trgm_ops"))], map: "Lead_normalizedName_trgm", type: Gin)
   @@index([sourceCode])
   @@index([campaignId])
 }
@@ -771,6 +774,7 @@ model Client {
   @@index([email])
   @@index([mobile])
   @@index([normalizedName])
+  @@index([normalizedName(ops: raw("gin_trgm_ops"))], map: "Client_normalizedName_trgm", type: Gin)
 }
 
 enum PartyRelationship {
