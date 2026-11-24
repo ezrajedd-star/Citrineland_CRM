@@ -1,0 +1,75 @@
+# Citrineland CRM — production-style stack (web, worker, caddy).
+# DATABASE_URL in .env points to DO Managed PostgreSQL (preferred).
+# To run Postgres inside Compose instead:  docker compose --profile localdb up -d
+# and set DATABASE_URL=postgresql://citrineland:<POSTGRES_PASSWORD>@db:5432/citrineland
+services:
+  migrate:
+    build: .
+    image: citrineland-crm:latest
+    env_file: .env
+    command: ["sh", "scripts/migrate-and-seed.sh"]
+    restart: "no"
+
+  web:
+    image: citrineland-crm:latest
+    env_file: .env
+    environment:
+      SERVICE_NAME: web
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    expose:
+      - "3000"
+
+  worker:
+    image: citrineland-crm:latest
+    env_file: .env
+    environment:
+      SERVICE_NAME: worker
+    command: ["npx", "tsx", "src/worker/index.ts"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+  db:
+    image: postgres:16-alpine
+    profiles: ["localdb"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: citrineland
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-citrineland}
+      POSTGRES_DB: citrineland
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U citrineland"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

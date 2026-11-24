@@ -1,0 +1,1431 @@
+// Citrineland CRM — Prisma schema
+// Money: BigInt centavos (columns suffixed `Cents`). Percentages: Float (e.g. 12.5 = 12.5%).
+// Every user-facing table has id (cuid), createdAt, updatedAt, createdById and, where deletion is
+// user-facing, a soft-delete `deletedAt`.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pg_trgm]
+}
+
+// ───────────────────────────── Identity, RBAC, audit ─────────────────────────────
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  DEACTIVATED
+}
+
+/// STAFF today. BROKER is reserved for the future broker portal (links to Broker via brokerId).
+enum UserType {
+  STAFF
+  BROKER
+}
+
+model User {
+  id                 String     @id @default(cuid())
+  email              String     @unique
+  name               String
+  type               UserType   @default(STAFF)
+  status             UserStatus @default(INVITED)
+  roleId             String
+  role               Role       @relation(fields: [roleId], references: [id])
+  passwordHash       String?
+  /// Future broker portal: the broker this login represents.
+  brokerId           String?    @unique
+  broker             Broker?    @relation("BrokerPortalUser", fields: [brokerId], references: [id])
+  phone              String?
+  emailNotifications Boolean    @default(false)
+  lastLoginAt        DateTime?
+  invitedAt          DateTime?
+  createdById        String?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  deletedAt          DateTime?
+
+  sessions            Session[]
+  microsoftConnection MicrosoftConnection?
+  notifications       Notification[]
+  tasksAssigned       Task[]               @relation("TaskAssignee")
+  leadsOwned          Lead[]               @relation("LeadOwner")
+  clientsOwned        Client[]             @relation("ClientOwner")
+  transactionsHandled Transaction[]        @relation("TxHandler")
+  holdsPlaced         Hold[]
+  auditLogs           AuditLog[]
+  quotas              Quota[]
+  activities          Activity[]
+
+  @@index([roleId])
+  @@index([status])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  /// System roles cannot be deleted. Admin's permissions cannot be edited.
+  isSystem    Boolean  @default(false)
+  /// Stable key for system roles (ADMIN, SALES_MANAGER, MARKETING_MANAGER, BNG_STAFF)
+  key         String?  @unique
+  /// List of "resource:action" strings. "*" means all permissions.
+  permissions String[]
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
+}
+
+/// Database-backed sessions. The JWT cookie only carries `sessionToken`; every request validates it here,
+/// so an Admin can force sign-out by revoking rows.
+model Session {
+  id            String    @id @default(cuid())
+  sessionToken  String    @unique
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider      String
+  expires       DateTime
+  revokedAt     DateTime?
+  revokedReason String?
+  ip            String?
+  userAgent     String?
+  lastSeenAt    DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+
+  @@index([userId])
+}
+
+enum AuthEventType {
+  SIGN_IN
+  SIGN_IN_FAILED
+  SIGN_OUT
+  FORCED_SIGN_OUT
+}
+
+model AuthEvent {
+  id        String        @id @default(cuid())
+  type      AuthEventType
+  userId    String?
+  email     String?
+  provider  String?
+  reason    String?
+  ip        String?
+  userAgent String?
+  createdAt DateTime      @default(now())
+
+  @@index([createdAt])
+  @@index([email])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id])
+  entity    String
+  entityId  String
+  action    String
+  before    Json?
+  after     Json?
+  diff      Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+model Setting {
+  key         String   @id
+  value       Json
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+}
+
+enum ConnectionStatus {
+  CONNECTED
+  ERROR
+  DISCONNECTED
+}
+
+model MicrosoftConnection {
+  id                   String           @id @default(cuid())
+  userId               String           @unique
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  msUserId             String?
+  email                String?
+  /// AES-256-GCM encrypted (see src/lib/crypto.ts)
+  refreshTokenEnc      String
+  accessTokenEnc       String?
+  accessTokenExpiresAt DateTime?
+  scopes               String?
+  status               ConnectionStatus @default(CONNECTED)
+  lastError            String?
+  lastMailSyncAt       DateTime?
+  lastCalendarSyncAt   DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String?
+  link      String?
+  kind      String    @default("INFO")
+  readAt    DateTime?
+  emailedAt DateTime?
+  /// Prevents duplicate notifications from repeated automation runs
+  dedupeKey String?   @unique
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt])
+}
+
+// ───────────────────────────── Developments & inventory ─────────────────────────────
+
+enum DevelopmentType {
+  CONDOMINIUM
+  SUBDIVISION
+  MIXED
+}
+
+enum DevelopmentStatus {
+  PRE_SELLING
+  RFO
+  COMPLETED
+}
+
+model Development {
+  id                 String            @id @default(cuid())
+  code               String            @unique
+  name               String
+  type               DevelopmentType
+  status             DevelopmentStatus @default(PRE_SELLING)
+  address            String?
+  city               String?
+  province           String?
+  description        String?
+  ltsNumber          String?
+  targetTurnoverDate DateTime?         @db.Date
+  createdById        String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  deletedAt          DateTime?
+
+  sections        Section[]
+  units           Unit[]
+  parkingSlots    ParkingSlot[]
+  priceLists      PriceList[]
+  paymentSchemes  PaymentScheme[]
+  transactions    Transaction[]
+  campaigns       Campaign[]
+  commissionRules CommissionRule[]
+  leads           Lead[]              @relation("LeadDevelopments")
+  computations    SampleComputation[]
+}
+
+enum SectionKind {
+  TOWER
+  BUILDING
+  PHASE
+  BLOCK
+}
+
+/// Generic grouping: Building/Tower for condos, Phase/Block for subdivisions.
+model Section {
+  id            String      @id @default(cuid())
+  developmentId String
+  development   Development @relation(fields: [developmentId], references: [id])
+  parentId      String?
+  parent        Section?    @relation("SectionTree", fields: [parentId], references: [id])
+  children      Section[]   @relation("SectionTree")
+  kind          SectionKind
+  name          String
+  code          String
+  floors        Int?
+  sortOrder     Int         @default(0)
+  createdById   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  deletedAt     DateTime?
+
+  units        Unit[]
+  parkingSlots ParkingSlot[]
+
+  @@unique([developmentId, code])
+  @@index([developmentId])
+}
+
+enum UnitType {
+  CONDO
+  HOUSE_AND_LOT
+  LOT_ONLY
+}
+
+enum InventoryStatus {
+  AVAILABLE
+  ON_HOLD
+  RESERVED
+  SOLD
+  BLOCKED
+}
+
+model Unit {
+  id              String          @id @default(cuid())
+  developmentId   String
+  development     Development     @relation(fields: [developmentId], references: [id])
+  sectionId       String?
+  section         Section?        @relation(fields: [sectionId], references: [id])
+  code            String
+  floor           Int?
+  block           String?
+  lot             String?
+  unitType        UnitType
+  model           String?
+  floorArea       Decimal?        @db.Decimal(10, 2)
+  lotArea         Decimal?        @db.Decimal(10, 2)
+  bedrooms        Int?
+  bathrooms       Int?
+  orientation     String?
+  status          InventoryStatus @default(AVAILABLE)
+  statusChangedAt DateTime        @default(now())
+  /// Start of the current "available" period, for inventory aging
+  availableSince  DateTime?       @default(now())
+  listPriceCents  BigInt
+  notes           String?
+  createdById     String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  deletedAt       DateTime?
+
+  holds            Hold[]
+  priceListItems   PriceListItem[]
+  transactionItems TransactionItem[]
+  statusLogs       InventoryStatusLog[]
+  computations     SampleComputation[]
+
+  @@unique([developmentId, code])
+  @@index([status])
+  @@index([sectionId])
+  @@index([code])
+}
+
+enum ParkingType {
+  REGULAR
+  TANDEM
+  PWD
+  EV
+}
+
+model ParkingSlot {
+  id              String          @id @default(cuid())
+  developmentId   String
+  development     Development     @relation(fields: [developmentId], references: [id])
+  sectionId       String?
+  section         Section?        @relation(fields: [sectionId], references: [id])
+  code            String
+  level           String?
+  type            ParkingType     @default(REGULAR)
+  status          InventoryStatus @default(AVAILABLE)
+  statusChangedAt DateTime        @default(now())
+  availableSince  DateTime?       @default(now())
+  listPriceCents  BigInt
+  notes           String?
+  createdById     String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  deletedAt       DateTime?
+
+  holds            Hold[]
+  priceListItems   PriceListItem[]
+  transactionItems TransactionItem[]
+  statusLogs       InventoryStatusLog[]
+  computations     SampleComputation[]
+
+  @@unique([developmentId, code])
+  @@index([status])
+  @@index([sectionId])
+}
+
+model InventoryStatusLog {
+  id            String          @id @default(cuid())
+  unitId        String?
+  unit          Unit?           @relation(fields: [unitId], references: [id])
+  parkingSlotId String?
+  parkingSlot   ParkingSlot?    @relation(fields: [parkingSlotId], references: [id])
+  fromStatus    InventoryStatus
+  toStatus      InventoryStatus
+  event         String
+  reason        String?
+  actorId       String?
+  createdAt     DateTime        @default(now())
+
+  @@index([unitId])
+  @@index([parkingSlotId])
+  @@index([createdAt])
+}
+
+enum HoldStatus {
+  ACTIVE
+  RELEASED
+  EXPIRED
+  CONVERTED
+}
+
+model Hold {
+  id                   String       @id @default(cuid())
+  unitId               String?
+  unit                 Unit?        @relation(fields: [unitId], references: [id])
+  parkingSlotId        String?
+  parkingSlot          ParkingSlot? @relation(fields: [parkingSlotId], references: [id])
+  placedById           String
+  placedBy             User         @relation(fields: [placedById], references: [id])
+  leadId               String?
+  lead                 Lead?        @relation(fields: [leadId], references: [id])
+  clientId             String?
+  client               Client?      @relation(fields: [clientId], references: [id])
+  brokerId             String?
+  broker               Broker?      @relation(fields: [brokerId], references: [id])
+  status               HoldStatus   @default(ACTIVE)
+  expiresAt            DateTime
+  releasedAt           DateTime?
+  releaseReason        String?
+  nearExpiryNotifiedAt DateTime?
+  notes                String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  @@index([status, expiresAt])
+  @@index([unitId])
+  @@index([parkingSlotId])
+}
+
+model PriceList {
+  id            String          @id @default(cuid())
+  developmentId String
+  development   Development     @relation(fields: [developmentId], references: [id])
+  version       Int
+  effectiveDate DateTime        @db.Date
+  notes         String?
+  createdById   String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  items         PriceListItem[]
+
+  @@unique([developmentId, version])
+}
+
+model PriceListItem {
+  id                 String       @id @default(cuid())
+  priceListId        String
+  priceList          PriceList    @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  unitId             String?
+  unit               Unit?        @relation(fields: [unitId], references: [id])
+  parkingSlotId      String?
+  parkingSlot        ParkingSlot? @relation(fields: [parkingSlotId], references: [id])
+  priceCents         BigInt
+  previousPriceCents BigInt?
+
+  @@index([priceListId])
+  @@index([unitId])
+  @@index([parkingSlotId])
+}
+
+enum SchemeKind {
+  SPOT_CASH
+  DEFERRED_CASH
+  DP_BALANCE
+}
+
+enum FinancingType {
+  BANK
+  PAGIBIG
+  IN_HOUSE
+}
+
+model PaymentScheme {
+  id                  String         @id @default(cuid())
+  /// null = available for all developments
+  developmentId       String?
+  development         Development?   @relation(fields: [developmentId], references: [id])
+  name                String
+  kind                SchemeKind
+  description         String?
+  reservationFeeCents BigInt
+  /// SPOT_CASH: discount on net list price
+  spotDiscountPct     Float          @default(0)
+  /// DEFERRED_CASH: number of equal monthly payments
+  deferredMonths      Int?
+  /// DP_BALANCE fields
+  dpPct               Float?
+  dpMonths            Int?
+  spotDpDiscountPct   Float          @default(0)
+  financing           FinancingType?
+  interestRatePct     Float?
+  termMonths          Int?
+  active              Boolean        @default(true)
+  sortOrder           Int            @default(0)
+  createdById         String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  deletedAt           DateTime?
+
+  transactions Transaction[]
+  computations SampleComputation[]
+
+  @@index([developmentId])
+}
+
+// ───────────────────────────── Brokers ─────────────────────────────
+
+enum AccreditationStatus {
+  PENDING
+  ACCREDITED
+  SUSPENDED
+  EXPIRED
+}
+
+model Brokerage {
+  id                   String              @id @default(cuid())
+  name                 String
+  address              String?
+  city                 String?
+  email                String?
+  phone                String?
+  contactPerson        String?
+  tin                  String?
+  accreditationStatus  AccreditationStatus @default(PENDING)
+  accreditationDate    DateTime?           @db.Date
+  accreditationExpiry  DateTime?           @db.Date
+  defaultCommissionPct Float?
+  notes                String?
+  netsuiteId           String?
+  netsuiteSyncedAt     DateTime?
+  createdById          String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  deletedAt            DateTime?
+
+  brokers         Broker[]
+  leads           Lead[]
+  transactions    Transaction[]
+  commissionRules CommissionRule[]
+  ledgers         CommissionLedger[]
+  quotas          Quota[]
+
+  @@index([name])
+}
+
+enum BrokerRole {
+  BROKER
+  SALESPERSON
+}
+
+model Broker {
+  id                        String              @id @default(cuid())
+  brokerageId               String?
+  brokerage                 Brokerage?          @relation(fields: [brokerageId], references: [id])
+  firstName                 String
+  lastName                  String
+  role                      BrokerRole          @default(SALESPERSON)
+  prcLicenseNo              String?
+  prcLicenseExpiry          DateTime?           @db.Date
+  dhsudRegNo                String?
+  email                     String?
+  mobile                    String?
+  accreditationStatus       AccreditationStatus @default(PENDING)
+  accreditationDate         DateTime?           @db.Date
+  accreditationExpiry       DateTime?           @db.Date
+  commissionRateOverridePct Float?
+  notes                     String?
+  netsuiteId                String?
+  netsuiteSyncedAt          DateTime?
+  createdById               String?
+  createdAt                 DateTime            @default(now())
+  updatedAt                 DateTime            @updatedAt
+  deletedAt                 DateTime?
+
+  portalUser   User?              @relation("BrokerPortalUser")
+  leads        Lead[]
+  clients      Client[]
+  transactions Transaction[]
+  holds        Hold[]
+  activities   Activity[]
+  tasks        Task[]
+  ledgers      CommissionLedger[]
+  quotas       Quota[]
+
+  @@index([brokerageId])
+  @@index([email])
+  @@index([mobile])
+  @@index([prcLicenseExpiry])
+}
+
+/// Files stored in DigitalOcean Spaces, attached polymorphically to any entity.
+model Document {
+  id           String    @id @default(cuid())
+  entityType   String
+  entityId     String
+  category     String
+  /// KYC documents require `kyc:view` to list/download
+  isKyc        Boolean   @default(false)
+  fileName     String
+  contentType  String
+  size         Int
+  storageKey   String    @unique
+  uploadedById String?
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
+
+  checklistItems TransactionDocument[]
+
+  @@index([entityType, entityId])
+}
+
+// ───────────────────────────── Leads, clients, pipeline ─────────────────────────────
+
+model PipelineStage {
+  id               String   @id @default(cuid())
+  name             String
+  order            Int
+  color            String   @default("#a8a29e")
+  probability      Int      @default(0)
+  isWon            Boolean  @default(false)
+  isLost           Boolean  @default(false)
+  /// Days in stage after which a deal is shown as stalled
+  stalledAfterDays Int      @default(14)
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  leads            Lead[]
+}
+
+/// Managed lists: LEAD_SOURCE, LOST_REASON, DOCUMENT_CATEGORY, CAMPAIGN_CHANNEL
+model Picklist {
+  id        String   @id @default(cuid())
+  type      String
+  code      String
+  label     String
+  order     Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([type, code])
+}
+
+enum UnitTypePref {
+  CONDO
+  HOUSE_AND_LOT
+  LOT_ONLY
+  PARKING
+  ANY
+}
+
+enum FinancingPref {
+  SPOT_CASH
+  DEFERRED_CASH
+  BANK
+  PAGIBIG
+  IN_HOUSE
+  UNDECIDED
+}
+
+model Lead {
+  id               String         @id @default(cuid())
+  firstName        String
+  lastName         String
+  normalizedName   String
+  email            String?
+  mobile           String?
+  sourceCode       String
+  campaignId       String?
+  campaign         Campaign?      @relation(fields: [campaignId], references: [id])
+  developments     Development[]  @relation("LeadDevelopments")
+  unitTypePref     UnitTypePref?
+  budgetMinCents   BigInt?
+  budgetMaxCents   BigInt?
+  financingPref    FinancingPref?
+  ownerId          String?
+  owner            User?          @relation("LeadOwner", fields: [ownerId], references: [id])
+  brokerId         String?
+  broker           Broker?        @relation(fields: [brokerId], references: [id])
+  brokerageId      String?
+  brokerage        Brokerage?     @relation(fields: [brokerageId], references: [id])
+  stageId          String
+  stage            PipelineStage  @relation(fields: [stageId], references: [id])
+  stageChangedAt   DateTime       @default(now())
+  lostReasonCode   String?
+  lostNotes        String?
+  clientId         String?
+  client           Client?        @relation(fields: [clientId], references: [id])
+  lastActivityAt   DateTime       @default(now())
+  doNotEmail       Boolean        @default(false)
+  unsubscribedAt   DateTime?
+  unsubscribeToken String         @unique @default(cuid())
+  privacyConsent   Boolean        @default(false)
+  privacyConsentAt DateTime?
+  utmSource        String?
+  utmMedium        String?
+  utmCampaign      String?
+  utmTerm          String?
+  utmContent       String?
+  notes            String?
+  createdById      String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  deletedAt        DateTime?
+
+  stageHistory LeadStageHistory[]
+  activities   Activity[]
+  tasks        Task[]
+  holds        Hold[]
+  computations SampleComputation[]
+  enrollments  SequenceEnrollment[]
+  transactions Transaction[]
+
+  @@index([stageId])
+  @@index([ownerId])
+  @@index([brokerId])
+  @@index([email])
+  @@index([mobile])
+  @@index([normalizedName])
+  @@index([sourceCode])
+  @@index([campaignId])
+}
+
+model LeadStageHistory {
+  id          String   @id @default(cuid())
+  leadId      String
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  fromStageId String?
+  toStageId   String
+  changedById String?
+  createdAt   DateTime @default(now())
+
+  @@index([leadId])
+  @@index([toStageId])
+}
+
+enum CivilStatus {
+  SINGLE
+  MARRIED
+  WIDOWED
+  SEPARATED
+  ANNULLED
+}
+
+model Client {
+  id                 String       @id @default(cuid())
+  firstName          String
+  middleName         String?
+  lastName           String
+  suffix             String?
+  normalizedName     String
+  birthdate          DateTime?    @db.Date
+  civilStatus        CivilStatus?
+  nationality        String?      @default("Filipino")
+  tin                String?
+  addressLine        String?
+  city               String?
+  province           String?
+  zipCode            String?
+  employer           String?
+  occupation         String?
+  monthlyIncomeCents BigInt?
+  email              String?
+  mobile             String?
+  ownerId            String?
+  owner              User?        @relation("ClientOwner", fields: [ownerId], references: [id])
+  brokerId           String?
+  broker             Broker?      @relation(fields: [brokerId], references: [id])
+  doNotEmail         Boolean      @default(false)
+  privacyConsent     Boolean      @default(false)
+  privacyConsentAt   DateTime?
+  anonymizedAt       DateTime?
+  netsuiteId         String?
+  netsuiteSyncedAt   DateTime?
+  notes              String?
+  createdById        String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  deletedAt          DateTime?
+
+  parties      ClientParty[]
+  leads        Lead[]
+  transactions Transaction[]
+  activities   Activity[]
+  tasks        Task[]
+  holds        Hold[]
+  computations SampleComputation[]
+
+  @@index([email])
+  @@index([mobile])
+  @@index([normalizedName])
+}
+
+enum PartyRelationship {
+  SPOUSE
+  CO_BUYER
+  ATTORNEY_IN_FACT
+  OTHER
+}
+
+model ClientParty {
+  id           String            @id @default(cuid())
+  clientId     String
+  client       Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  relationship PartyRelationship
+  fullName     String
+  birthdate    DateTime?         @db.Date
+  civilStatus  CivilStatus?
+  nationality  String?
+  tin          String?
+  email        String?
+  mobile       String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+}
+
+enum ActivityType {
+  NOTE
+  CALL
+  MEETING
+  SITE_VISIT
+  EMAIL_IN
+  EMAIL_OUT
+  TASK
+  STATUS_CHANGE
+  SYSTEM
+}
+
+/// Timeline entry. Attach to one or more of lead/client/broker/transaction.
+model Activity {
+  id            String       @id @default(cuid())
+  type          ActivityType
+  subject       String
+  body          String?
+  occurredAt    DateTime     @default(now())
+  actorId       String?
+  actor         User?        @relation(fields: [actorId], references: [id])
+  leadId        String?
+  lead          Lead?        @relation(fields: [leadId], references: [id])
+  clientId      String?
+  client        Client?      @relation(fields: [clientId], references: [id])
+  brokerId      String?
+  broker        Broker?      @relation(fields: [brokerId], references: [id])
+  transactionId String?
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+  /// Email participants, Outlook web link, calendar event id, etc.
+  meta          Json?
+  /// Dedupe key for externally captured items (e.g. Graph internetMessageId + entity)
+  externalKey   String?      @unique
+  createdAt     DateTime     @default(now())
+
+  @@index([leadId, occurredAt])
+  @@index([clientId, occurredAt])
+  @@index([brokerId, occurredAt])
+  @@index([transactionId, occurredAt])
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+model Task {
+  id            String       @id @default(cuid())
+  title         String
+  description   String?
+  dueAt         DateTime?
+  priority      TaskPriority @default(MEDIUM)
+  status        TaskStatus   @default(OPEN)
+  assigneeId    String?
+  assignee      User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  leadId        String?
+  lead          Lead?        @relation(fields: [leadId], references: [id])
+  clientId      String?
+  client        Client?      @relation(fields: [clientId], references: [id])
+  brokerId      String?
+  broker        Broker?      @relation(fields: [brokerId], references: [id])
+  transactionId String?
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+  completedAt   DateTime?
+  /// Set by automations to avoid duplicate tasks
+  dedupeKey     String?      @unique
+  createdById   String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([assigneeId, status])
+  @@index([dueAt])
+}
+
+// ───────────────────────────── Sample computations ─────────────────────────────
+
+model SampleComputation {
+  id              String        @id @default(cuid())
+  leadId          String?
+  lead            Lead?         @relation(fields: [leadId], references: [id])
+  clientId        String?
+  client          Client?       @relation(fields: [clientId], references: [id])
+  developmentId   String
+  development     Development   @relation(fields: [developmentId], references: [id])
+  unitId          String?
+  unit            Unit?         @relation(fields: [unitId], references: [id])
+  parkingSlotId   String?
+  parkingSlot     ParkingSlot?  @relation(fields: [parkingSlotId], references: [id])
+  paymentSchemeId String
+  paymentScheme   PaymentScheme @relation(fields: [paymentSchemeId], references: [id])
+  /// Version number per lead (1, 2, 3...)
+  version         Int           @default(1)
+  inputs          Json
+  result          Json
+  tcpCents        BigInt
+  validUntil      DateTime
+  sentAt          DateTime?
+  createdById     String?
+  createdAt       DateTime      @default(now())
+
+  @@index([leadId])
+  @@index([clientId])
+}
+
+// ───────────────────────────── Transactions ─────────────────────────────
+
+enum TransactionStatus {
+  RESERVED
+  DOCUMENTATION
+  CONTRACT_SIGNED
+  DOWNPAYMENT_IN_PROGRESS
+  DOWNPAYMENT_COMPLETE
+  FOR_LOAN_TAKEOUT
+  BALANCE_IN_PROGRESS
+  FULLY_PAID
+  TURNED_OVER
+  TITLED
+  CANCELLED
+  TRANSFERRED
+}
+
+model Transaction {
+  id                   String            @id @default(cuid())
+  code                 String            @unique
+  clientId             String
+  client               Client            @relation(fields: [clientId], references: [id])
+  leadId               String?
+  lead                 Lead?             @relation(fields: [leadId], references: [id])
+  developmentId        String
+  development          Development       @relation(fields: [developmentId], references: [id])
+  brokerId             String?
+  broker               Broker?           @relation(fields: [brokerId], references: [id])
+  brokerageId          String?
+  brokerage            Brokerage?        @relation(fields: [brokerageId], references: [id])
+  handlingStaffId      String?
+  handlingStaff        User?             @relation("TxHandler", fields: [handlingStaffId], references: [id])
+  status               TransactionStatus @default(RESERVED)
+  statusChangedAt      DateTime          @default(now())
+  paymentSchemeId      String
+  paymentScheme        PaymentScheme     @relation(fields: [paymentSchemeId], references: [id])
+  /// Frozen copy of scheme + settings used at reservation
+  schemeSnapshot       Json
+  /// Frozen sample-computation result
+  pricingSnapshot      Json
+  listPriceCents       BigInt
+  discountCents        BigInt            @default(0)
+  netSellingPriceCents BigInt
+  vatCents             BigInt            @default(0)
+  miscFeesCents        BigInt            @default(0)
+  tcpCents             BigInt
+  reservationFeeCents  BigInt
+  downpaymentCents     BigInt            @default(0)
+  balanceCents         BigInt            @default(0)
+  financing            FinancingType?
+  reservedAt           DateTime
+  contractSignedAt     DateTime?
+  dpCompletedAt        DateTime?
+  fullyPaidAt          DateTime?
+  turnedOverAt         DateTime?
+  titledAt             DateTime?
+  cancelledAt          DateTime?
+  cancelReason         String?
+  cancelledById        String?
+  macedaSnapshot       Json?
+  transferredToId      String?           @unique
+  transferredTo        Transaction?      @relation("TxTransfer", fields: [transferredToId], references: [id])
+  transferredFrom      Transaction?      @relation("TxTransfer")
+  notes                String?
+  netsuiteId           String?
+  netsuiteSyncedAt     DateTime?
+  createdById          String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  deletedAt            DateTime?
+
+  items      TransactionItem[]
+  statusLogs TransactionStatusLog[]
+  schedule   ScheduleItem[]
+  payments   Payment[]
+  documents  TransactionDocument[]
+  ledger     CommissionLedger?
+  activities Activity[]
+  tasks      Task[]
+
+  @@index([status])
+  @@index([clientId])
+  @@index([brokerId])
+  @@index([brokerageId])
+  @@index([developmentId])
+  @@index([reservedAt])
+}
+
+enum ItemKind {
+  UNIT
+  PARKING
+}
+
+model TransactionItem {
+  id               String       @id @default(cuid())
+  transactionId    String
+  transaction      Transaction  @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  kind             ItemKind
+  unitId           String?
+  unit             Unit?        @relation(fields: [unitId], references: [id])
+  parkingSlotId    String?
+  parkingSlot      ParkingSlot? @relation(fields: [parkingSlotId], references: [id])
+  /// Price snapshot at reservation
+  listPriceCents   BigInt
+  priceListVersion Int?
+  /// false once the item is released (cancellation/transfer)
+  active           Boolean      @default(true)
+
+  @@index([transactionId])
+  @@index([unitId])
+  @@index([parkingSlotId])
+}
+
+model TransactionStatusLog {
+  id            String             @id @default(cuid())
+  transactionId String
+  transaction   Transaction        @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  fromStatus    TransactionStatus?
+  toStatus      TransactionStatus
+  note          String?
+  actorId       String?
+  createdAt     DateTime           @default(now())
+
+  @@index([transactionId])
+}
+
+enum ScheduleKind {
+  RESERVATION
+  SPOT
+  DEFERRED
+  DOWNPAYMENT
+  BALANCE
+  AMORTIZATION
+}
+
+model ScheduleItem {
+  id             String       @id @default(cuid())
+  transactionId  String
+  transaction    Transaction  @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  seq            Int
+  kind           ScheduleKind
+  label          String
+  dueDate        DateTime     @db.Date
+  amountCents    BigInt
+  principalCents BigInt?
+  interestCents  BigInt?
+  /// Amount of recorded payments allocated to this item (oldest-first)
+  paidCents      BigInt       @default(0)
+  reminderSentAt DateTime?
+
+  @@unique([transactionId, seq])
+  @@index([dueDate])
+}
+
+enum PaymentSource {
+  MANUAL
+  CSV
+  NETSUITE
+}
+
+enum PaymentMethod {
+  CASH
+  CHECK
+  PDC
+  BANK_TRANSFER
+  ONLINE
+  CREDIT_CARD
+  LOAN_PROCEEDS
+  OTHER
+}
+
+model Payment {
+  id               String        @id @default(cuid())
+  transactionId    String
+  transaction      Transaction   @relation(fields: [transactionId], references: [id])
+  paidAt           DateTime      @db.Date
+  amountCents      BigInt
+  orNumber         String?
+  method           PaymentMethod
+  reference        String?
+  source           PaymentSource @default(MANUAL)
+  externalId       String?
+  notes            String?
+  voidedAt         DateTime?
+  voidReason       String?
+  netsuiteId       String?
+  netsuiteSyncedAt DateTime?
+  recordedById     String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@unique([source, externalId])
+  @@index([transactionId])
+  @@index([paidAt])
+}
+
+enum ChecklistStatus {
+  PENDING
+  SUBMITTED
+  VERIFIED
+  REJECTED
+}
+
+/// Configurable documentation checklist template
+model DocumentTemplateItem {
+  id                      String          @id @default(cuid())
+  name                    String
+  description             String?
+  required                Boolean         @default(true)
+  dueDaysAfterReservation Int             @default(30)
+  /// Only for these financing types (empty = all)
+  financingFilter         FinancingType[]
+  /// Only for these scheme kinds (empty = all)
+  schemeFilter            SchemeKind[]
+  /// Only when buyer is married
+  marriedOnly             Boolean         @default(false)
+  order                   Int             @default(0)
+  active                  Boolean         @default(true)
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+}
+
+model TransactionDocument {
+  id            String          @id @default(cuid())
+  transactionId String
+  transaction   Transaction     @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  name          String
+  required      Boolean         @default(true)
+  status        ChecklistStatus @default(PENDING)
+  dueDate       DateTime?       @db.Date
+  documentId    String?
+  document      Document?       @relation(fields: [documentId], references: [id])
+  verifiedById  String?
+  verifiedAt    DateTime?
+  rejectReason  String?
+  order         Int             @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([transactionId])
+  @@index([status, dueDate])
+}
+
+// ───────────────────────────── Commissions ─────────────────────────────
+
+enum CommissionBasis {
+  NSP
+  TCP
+}
+
+enum TrancheStatus {
+  NOT_DUE
+  DUE
+  APPROVED
+  RELEASED
+  FORFEITED
+}
+
+/// Rule matched by specificity: development+brokerage > brokerage > development > global.
+model CommissionRule {
+  id                String          @id @default(cuid())
+  name              String
+  developmentId     String?
+  development       Development?    @relation(fields: [developmentId], references: [id])
+  brokerageId       String?
+  brokerage         Brokerage?      @relation(fields: [brokerageId], references: [id])
+  ratePct           Float
+  basis             CommissionBasis @default(NSP)
+  brokerageSharePct Float           @default(100)
+  agentSharePct     Float           @default(0)
+  /// [{ label, pct, milestone: { type, value? } }]
+  tranches          Json
+  active            Boolean         @default(true)
+  createdById       String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  ledgers CommissionLedger[]
+}
+
+model CommissionLedger {
+  id                  String          @id @default(cuid())
+  transactionId       String          @unique
+  transaction         Transaction     @relation(fields: [transactionId], references: [id])
+  ruleId              String?
+  rule                CommissionRule? @relation(fields: [ruleId], references: [id])
+  ruleSnapshot        Json
+  brokerageId         String?
+  brokerage           Brokerage?      @relation(fields: [brokerageId], references: [id])
+  brokerId            String?
+  broker              Broker?         @relation(fields: [brokerId], references: [id])
+  basis               CommissionBasis
+  basisCents          BigInt
+  ratePct             Float
+  earnedCents         BigInt
+  brokerageShareCents BigInt
+  agentShareCents     BigInt
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  tranches    CommissionTranche[]
+  adjustments CommissionAdjustment[]
+
+  @@index([brokerageId])
+  @@index([brokerId])
+}
+
+model CommissionTranche {
+  id                   String           @id @default(cuid())
+  ledgerId             String
+  ledger               CommissionLedger @relation(fields: [ledgerId], references: [id], onDelete: Cascade)
+  seq                  Int
+  label                String
+  pct                  Float
+  milestoneType        String
+  milestoneValue       Float?
+  amountCents          BigInt
+  brokerageAmountCents BigInt
+  agentAmountCents     BigInt
+  status               TrancheStatus    @default(NOT_DUE)
+  dueAt                DateTime?
+  approvedAt           DateTime?
+  approvedById         String?
+  releasedAt           DateTime?
+  releasedById         String?
+  releaseReference     String?
+  forfeitedAt          DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  @@unique([ledgerId, seq])
+  @@index([status])
+}
+
+/// Manual adjustments, e.g. clawback of released commission (negative amount)
+model CommissionAdjustment {
+  id          String           @id @default(cuid())
+  ledgerId    String
+  ledger      CommissionLedger @relation(fields: [ledgerId], references: [id], onDelete: Cascade)
+  amountCents BigInt
+  reason      String
+  createdById String?
+  createdAt   DateTime         @default(now())
+}
+
+enum QuotaTarget {
+  STAFF
+  BROKER
+  BROKERAGE
+}
+
+enum QuotaPeriod {
+  MONTH
+  QUARTER
+}
+
+model Quota {
+  id          String      @id @default(cuid())
+  targetType  QuotaTarget
+  userId      String?
+  user        User?       @relation(fields: [userId], references: [id])
+  brokerId    String?
+  broker      Broker?     @relation(fields: [brokerId], references: [id])
+  brokerageId String?
+  brokerage   Brokerage?  @relation(fields: [brokerageId], references: [id])
+  periodType  QuotaPeriod
+  periodStart DateTime    @db.Date
+  units       Int?
+  valueCents  BigInt?
+  createdById String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([periodStart])
+}
+
+// ───────────────────────────── Marketing ─────────────────────────────
+
+model Campaign {
+  id            String       @id @default(cuid())
+  name          String
+  code          String       @unique
+  channel       String
+  developmentId String?
+  development   Development? @relation(fields: [developmentId], references: [id])
+  budgetCents   BigInt       @default(0)
+  startDate     DateTime?    @db.Date
+  endDate       DateTime?    @db.Date
+  description   String?
+  active        Boolean      @default(true)
+  createdById   String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
+
+  leads Lead[]
+}
+
+model EmailTemplate {
+  id          String    @id @default(cuid())
+  name        String
+  subject     String
+  /// Supports merge fields like {{lead.firstName}}
+  bodyHtml    String
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  steps SequenceStep[]
+}
+
+model EmailSequence {
+  id                String    @id @default(cuid())
+  name              String
+  description       String?
+  active            Boolean   @default(true)
+  stopOnReply       Boolean   @default(true)
+  stopOnStageChange Boolean   @default(true)
+  /// Auto-enroll when a lead enters this stage (optional)
+  triggerStageId    String?
+  createdById       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  steps       SequenceStep[]
+  enrollments SequenceEnrollment[]
+}
+
+model SequenceStep {
+  id         String        @id @default(cuid())
+  sequenceId String
+  sequence   EmailSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  order      Int
+  delayDays  Int
+  templateId String
+  template   EmailTemplate @relation(fields: [templateId], references: [id])
+
+  sends SequenceSend[]
+
+  @@unique([sequenceId, order])
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  STOPPED
+}
+
+model SequenceEnrollment {
+  id                  String           @id @default(cuid())
+  sequenceId          String
+  sequence            EmailSequence    @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  leadId              String
+  lead                Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  status              EnrollmentStatus @default(ACTIVE)
+  nextStepOrder       Int              @default(1)
+  nextRunAt           DateTime?
+  stageIdAtEnrollment String?
+  stoppedReason       String?
+  enrolledById        String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  sends SequenceSend[]
+
+  @@index([status, nextRunAt])
+  @@index([leadId])
+}
+
+model SequenceSend {
+  id           String             @id @default(cuid())
+  enrollmentId String
+  enrollment   SequenceEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  stepId       String
+  step         SequenceStep       @relation(fields: [stepId], references: [id])
+  status       String
+  error        String?
+  sentAt       DateTime           @default(now())
+  repliedAt    DateTime?
+
+  @@index([enrollmentId])
+}
+
+// ───────────────────────────── Automation ─────────────────────────────
+
+model AutomationRule {
+  id          String   @id @default(cuid())
+  name        String
+  /// Stable key for built-in automations; null for custom rules
+  builtInKey  String?  @unique
+  enabled     Boolean  @default(true)
+  trigger     String
+  /// [{ field, op, value }]
+  conditions  Json     @default("[]")
+  /// [{ type, params }]
+  actions     Json     @default("[]")
+  /// Built-in timing/config values (hours, days, etc.)
+  config      Json     @default("{}")
+  description String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  logs AutomationLog[]
+}
+
+model AutomationLog {
+  id        String         @id @default(cuid())
+  ruleId    String
+  rule      AutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  entity    String?
+  entityId  String?
+  status    String
+  message   String?
+  createdAt DateTime       @default(now())
+
+  @@index([ruleId, createdAt])
+}
