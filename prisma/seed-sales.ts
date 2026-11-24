@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { normalizeName } from "../src/lib/normalize";
+import { seedTransactions } from "./seed-transactions";
 
 const FIRST = ["Juan", "Maria", "Jose", "Ana", "Paolo", "Kristine", "Mark", "Angela", "Rafael", "Bianca", "Carlo", "Denise", "Enrique", "Faith", "Gabriel", "Hannah", "Ivan", "Joy", "Kevin", "Lianne", "Miguel", "Nicole", "Oscar", "Patricia", "Quentin", "Rhea", "Santiago", "Trisha", "Ulysses", "Vanessa", "Warren", "Ximena", "Yves", "Zara", "Andres", "Bettina", "Cesar", "Dahlia", "Emilio", "Frida"];
 const LAST = ["Dela Cruz", "Santos", "Reyes", "Bautista", "Garcia", "Mendoza", "Torres", "Villanueva", "Ramos", "Aquino", "Castillo", "Navarro", "Flores", "Lim", "Tan", "Gonzales", "Cruz", "Del Rosario", "Pascual", "Soriano"];
@@ -15,6 +16,7 @@ function rng(seed: number) {
 export async function seedDemoSales(prisma: PrismaClient, userIds: Record<string, string>) {
   if ((await prisma.brokerage.count()) > 0) {
     console.log("Demo brokers/leads already present — skipping.");
+    await seedTransactions(prisma, userIds);
     return;
   }
   console.log("Seeding brokerages, brokers and leads…");
@@ -137,4 +139,5 @@ export async function seedDemoSales(prisma: PrismaClient, userIds: Record<string
     if (i % 5 === 0 && !stage.isLost)
       await prisma.task.create({ data: { title: `Follow up with ${fn} ${ln}`, dueAt: new Date(now + ((i % 3) - 1) * day), assigneeId: lead.ownerId, leadId: lead.id, priority: i % 2 ? "HIGH" : "MEDIUM", createdById: lead.ownerId } });
   }
+  await seedTransactions(prisma, userIds);
 }
