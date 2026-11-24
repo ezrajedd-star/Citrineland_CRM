@@ -38,6 +38,7 @@ export const formSchemas = {
   quota: S.quotaSchema,
   campaign: S.campaignSchema,
   emailTemplate: S.emailTemplateSchema,
+  enroll: S.enrollSchema,
 } satisfies Record<string, ZodTypeAny>;
 
 export type FormSchemaKey = keyof typeof formSchemas;

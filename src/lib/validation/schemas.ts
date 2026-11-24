@@ -536,6 +536,8 @@ export const composeEmailSchema = z.object({
   templateId: zOptId,
 });
 
+export const enrollSchema = z.object({ leadId: zId, sequenceId: zId });
+
 export const automationRuleSchema = z.object({
   id: zOptId,
   name: zReq("Name", 120),

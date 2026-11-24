@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { BUILTINS } from "../src/server/automation/engine";
 
 /** Default configuration (not demo data): pipeline stages, picklists, documentation checklist. Idempotent. */
 export async function seedConfig(prisma: PrismaClient) {
@@ -69,5 +70,8 @@ export async function seedConfig(prisma: PrismaClient) {
       { name: "Deed of Absolute Sale", dueDaysAfterReservation: 365, required: false },
     ];
     for (const [i, it] of items.entries()) await prisma.documentTemplateItem.create({ data: { ...(it as any), order: i + 1 } });
+  }
+  for (const [key, def] of Object.entries(BUILTINS)) {
+    await prisma.automationRule.upsert({ where: { builtInKey: key }, create: { builtInKey: key, name: def.name, trigger: def.trigger, description: def.description, config: def.config as any }, update: { name: def.name, description: def.description } });
   }
 }

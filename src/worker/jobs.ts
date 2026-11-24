@@ -9,6 +9,8 @@ import { expireHolds, notifyHoldsNearingExpiry } from "@/server/holds";
 import { applyDuePriceLists } from "@/server/price-lists";
 import { syncAllMailboxes, syncAllCalendars, emailPendingNotifications } from "@/server/graph/sync";
 import { graphConfigured } from "@/server/graph/client";
+import { dispatch, scanInactiveLeads, scanOverdueDocuments, scanPaymentReminders, scanBrokerExpiry } from "@/server/automation/engine";
+import { runDueSequences } from "@/server/sequences";
 
 export type JobHandler = (data: any) => Promise<unknown>;
 
@@ -32,6 +34,35 @@ export const JOBS: Record<string, { handler: JobHandler; cron?: string; descript
     cron: "5 0 * * *",
     description: "Apply future-dated price list versions on their effective date",
     handler: async () => applyDuePriceLists(SYSTEM_CTX),
+  },
+  "automation.dispatch": {
+    description: "Run built-in automations and custom rules for a domain event",
+    handler: async (event) => dispatch(event),
+  },
+  "automation.lead-inactivity": {
+    cron: "0 8 * * *",
+    description: "Follow-up tasks for leads without activity (built-in automation)",
+    handler: async () => scanInactiveLeads(),
+  },
+  "automation.documents-overdue": {
+    cron: "15 * * * *",
+    description: "Tasks + notifications for overdue documentation items",
+    handler: async () => scanOverdueDocuments(),
+  },
+  "automation.payment-reminders": {
+    cron: "30 7 * * *",
+    description: "Internal tasks for payments due in N days and overdue payments",
+    handler: async () => scanPaymentReminders(),
+  },
+  "automation.broker-expiry": {
+    cron: "45 7 * * *",
+    description: "PRC license / accreditation expiry notices (60/30/7 days) and auto-EXPIRED",
+    handler: async () => scanBrokerExpiry(),
+  },
+  "sequences.run": {
+    cron: "*/10 * * * *",
+    description: "Send due email-sequence steps from the lead owner's Outlook",
+    handler: async () => (graphConfigured() ? runDueSequences() : 0),
   },
   "graph.mail-sync": {
     cron: "*/5 * * * *",

@@ -82,6 +82,10 @@ export async function expireHolds(now = new Date()) {
 
 /** Worker: notify holders when a hold is about to expire. */
 export async function notifyHoldsNearingExpiry(hoursBefore: number, now = new Date()) {
+  const { builtinRule } = await import("./automation/engine");
+  const rule = await builtinRule("hold_expiry");
+  if (!rule.enabled) return 0;
+  hoursBefore = Number(rule.config.hoursBefore ?? hoursBefore);
   const soon = new Date(now.getTime() + hoursBefore * 3_600_000);
   const holds = await prisma.hold.findMany({
     where: { status: "ACTIVE", expiresAt: { gt: now, lte: soon }, nearExpiryNotifiedAt: null },

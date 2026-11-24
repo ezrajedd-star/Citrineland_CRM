@@ -16,6 +16,7 @@ import { Timeline } from "@/components/app/timeline";
 import { TasksPanel } from "@/components/app/tasks-panel";
 import { ComposeEmailButton } from "@/components/app/compose-email";
 import { saveLead, deleteLead, overrideBroker, moveStage, convertToClient } from "@/server/actions/crm";
+import { enrollAction, stopEnrollmentAction } from "@/server/actions/marketing";
 import { leadFields } from "@/components/forms/crm-fields";
 import { findDuplicates } from "@/server/duplicates";
 import { leadScope } from "@/server/leads";
@@ -51,7 +52,11 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
     prisma.hold.findMany({ where: { leadId: id }, include: { unit: true, parkingSlot: true, placedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
   ]);
   const canEdit = can(user, "leads:update");
-  const transactions = await prisma.transaction.findMany({ where: { leadId: id }, select: { id: true, code: true, status: true } });
+  const [transactions, enrollments, sequences] = await Promise.all([
+    prisma.transaction.findMany({ where: { leadId: id }, select: { id: true, code: true, status: true } }),
+    prisma.sequenceEnrollment.findMany({ where: { leadId: id }, include: { sequence: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
+    prisma.emailSequence.findMany({ where: { active: true, deletedAt: null }, select: { id: true, name: true } }),
+  ]);
   return (
     <>
       <PageHeader
@@ -227,6 +232,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
           { key: "tasks", label: "Tasks" },
           { key: "computations", label: "Computations", count: computations.length },
           { key: "holds", label: "Holds", count: holds.length },
+          { key: "sequences", label: "Email sequences", count: enrollments.filter((e) => e.status === "ACTIVE").length },
           { key: "documents", label: "Documents" },
           { key: "history", label: "History" },
         ]}
@@ -319,6 +325,47 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             </TBody>
           </Table>
           {holds.length === 0 && <EmptyState title="No holds" />}
+        </Card>
+      )}
+      {tab === "sequences" && (
+        <Card>
+          <div className="flex justify-end border-b p-3">
+            {canEdit && lead.email && !lead.doNotEmail && sequences.length > 0 && (
+              <FormDialog
+                title="Enroll in email sequence"
+                triggerLabel="Enroll"
+                schema="enroll"
+                columns={1}
+                action={enrollAction}
+                defaultValues={{ leadId: lead.id, sequenceId: sequences[0].id }}
+                fields={[
+                  { name: "leadId", label: "", type: "hidden" },
+                  { name: "sequenceId", label: "Sequence", type: "select", emptyOption: false, options: sequences.map((s) => ({ value: s.id, label: s.name })) },
+                ]}
+              />
+            )}
+          </div>
+          <Table>
+            <TBody>
+              {enrollments.map((e) => (
+                <TR key={e.id}>
+                  <TD className="font-medium">{e.sequence.name}</TD>
+                  <TD>
+                    <StatusBadge status={e.status} />
+                  </TD>
+                  <TD className="text-xs text-muted-foreground">{e.stoppedReason ?? (e.nextRunAt ? `Next email ${formatDateTime(e.nextRunAt)}` : "")}</TD>
+                  <TD className="text-right">
+                    {e.status === "ACTIVE" && canEdit && (
+                      <ConfirmAction action={stopEnrollmentAction} args={{ enrollmentId: e.id, leadId: lead.id }} title="Stop this sequence?" variant="ghost">
+                        Stop
+                      </ConfirmAction>
+                    )}
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+          {enrollments.length === 0 && <EmptyState title="Not enrolled in any sequence" description={lead.doNotEmail ? "This lead is marked do-not-email." : undefined} />}
         </Card>
       )}
       {tab === "documents" && (

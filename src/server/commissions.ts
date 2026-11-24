@@ -79,7 +79,8 @@ export async function evaluateTranches(tx: Tx, transactionId: string, ctx: Actor
     const due = ledger.tranches.filter((x) => r.toDue.includes(x.id));
     const total = due.reduce((a, x) => a + x.amountCents, 0n);
     await logActivity({ type: "SYSTEM", subject: `Commission tranche(s) due: ${due.map((d) => d.label).join(", ")} (${formatPeso(total)})`, transactionId, brokerId: ledger.brokerId, actorId: ctx.userId }, tx);
-    const approvers = await usersWithPermission("commissions:approve", tx);
+    const { automationEnabled } = await import("./automation/engine");
+    const approvers = (await automationEnabled("commission_due")) ? await usersWithPermission("commissions:approve", tx) : [];
     await notifyUsers(approvers, { title: `Commission due — ${t.code}`, body: `${due.map((d) => d.label).join("; ")}: ${formatPeso(total)}`, link: `/commissions?status=DUE`, kind: "COMMISSION", dedupeKey: `tranche-due:${r.toDue.sort().join(",")}` }, tx);
     await audit(ctx, { entity: "CommissionLedger", entityId: ledger.id, action: "tranches_due", after: { trancheIds: r.toDue } }, tx);
   }

@@ -26,6 +26,8 @@ export async function seedDemo(prisma: PrismaClient, roles: Record<string, strin
   }
   const { seedDemoSales } = await import("./seed-sales");
   await seedDemoSales(prisma, userIds);
+  const { seedMarketing } = await import("./seed-marketing");
+  await seedMarketing(prisma, userIds);
 }
 
 async function seedInventory(prisma: PrismaClient, adminId: string) {

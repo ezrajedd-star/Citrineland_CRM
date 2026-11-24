@@ -201,7 +201,9 @@ export async function createReservation(input: ReservationInput, ctx: ActorCtx &
     { timeout: 30_000, isolationLevel: "ReadCommitted" },
   );
 
-  await afterReservation(created.id);
+  // Documentation tasks + BNG notification run via the "reservation_created" automation (worker).
+  // When events are disabled (tests/seed) run them inline so behaviour is the same.
+  if (process.env.DISABLE_EVENTS === "true") await afterReservation(created.id);
   await emit({ type: "transaction.reserved", transactionId: created.id, actorId: ctx.userId });
   return created;
 }
