@@ -9,13 +9,13 @@ import { saveTask, setTaskStatus } from "@/server/actions/crm";
 import { taskFields } from "@/components/forms/crm-fields";
 import { userOptions } from "@/server/queries/options";
 
-export async function TasksPanel({ filter, showRelated = false }: { filter: { leadId?: string; clientId?: string; brokerId?: string; transactionId?: string; assigneeId?: string }; showRelated?: boolean }) {
+export async function TasksPanel({ filter, showRelated = false, limit = 100 }: { filter: { leadId?: string; clientId?: string; brokerId?: string; transactionId?: string; assigneeId?: string }; showRelated?: boolean; limit?: number }) {
   const [tasks, users] = await Promise.all([
     prisma.task.findMany({
       where: { ...filter, status: { in: ["OPEN", "IN_PROGRESS"] } },
       include: { assignee: { select: { name: true } }, lead: { select: { id: true, firstName: true, lastName: true } }, client: { select: { id: true, firstName: true, lastName: true } }, transaction: { select: { id: true, code: true } } },
       orderBy: [{ dueAt: { sort: "asc", nulls: "last" } }],
-      take: 100,
+      take: limit,
     }),
     userOptions(),
   ]);
@@ -75,6 +75,11 @@ export async function TasksPanel({ filter, showRelated = false }: { filter: { le
             );
           })}
         </ul>
+      )}
+      {tasks.length === limit && limit < 100 && (
+        <a href="/tasks" className="block text-center text-xs text-brand-700 hover:underline">
+          View all tasks →
+        </a>
       )}
     </div>
   );

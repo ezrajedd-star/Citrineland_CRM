@@ -40,7 +40,8 @@ export function ReportTableView({ table, totals = true }: { table: RT; totals?: 
     return String(v);
   };
   const numeric = (t?: string) => t === "money" || t === "number" || t === "pct";
-  const sums = Object.fromEntries(table.columns.filter((c) => c.type === "money" || c.type === "number").map((c) => [c.key, table.rows.reduce((a, r) => a + (Number(r[c.key]) || 0), 0)]));
+  const NO_TOTAL = new Set(["rank", "version", "avgDays", "absorption", "avgDaysAvailable"]);
+  const sums = Object.fromEntries(table.columns.filter((c) => (c.type === "money" || c.type === "number") && !NO_TOTAL.has(c.key)).map((c) => [c.key, table.rows.reduce((a, r) => a + (Number(r[c.key]) || 0), 0)]));
   return (
     <Table>
       <THead>

@@ -105,6 +105,12 @@ export async function seedTransactions(prisma: PrismaClient, userIds: Record<str
     for (const [k, s] of p.path.entries()) {
       await changeTransactionStatus({ transactionId: t.id, toStatus: s, effectiveDate: new Date(resDate.getTime() + (k + 1) * 10 * DAY) }, ctx);
     }
+    // Older demo transactions: documents that were due before today have been collected and verified
+    if (p.path.length >= 2) {
+      const docs = await prisma.transactionDocument.findMany({ where: { transactionId: t.id, dueDate: { lt: new Date() } } });
+      await prisma.transactionDocument.updateMany({ where: { id: { in: docs.map((x) => x.id) } }, data: { status: "VERIFIED", verifiedAt: new Date(), verifiedById: userIds.BNG_STAFF } });
+      await prisma.task.updateMany({ where: { dedupeKey: { in: docs.map((x) => `doc:${x.id}`) } }, data: { status: "DONE", completedAt: new Date() } });
+    }
     if (p.cancel) await cancelTransaction({ transactionId: t.id, reason: p.cancel }, ctx);
     if (p.approve) {
       const due = await prisma.commissionTranche.findMany({ where: { ledger: { transactionId: t.id }, status: "DUE" } });

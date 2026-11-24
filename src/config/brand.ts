@@ -35,3 +35,15 @@ export const inventoryStatusColors: Record<string, { bg: string; text: string; l
   SOLD: { bg: "#e7e5e4", text: "#44403c", label: "Sold" },
   BLOCKED: { bg: "#fee2e2", text: "#991b1b", label: "Blocked" },
 };
+
+/**
+ * Chart colors. Categorical slots are the validated default palette (fixed order, never cycled);
+ * single-series magnitude charts use the brand accent. Status colors are reserved for state.
+ */
+export const chartColors = {
+  categorical: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"],
+  single: brand.colors[600],
+  grid: "#e7e5e4",
+  axis: "#78716c",
+  ink: "#44403c",
+};

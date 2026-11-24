@@ -21,11 +21,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ report: 
   if (!can(user, def.permission) || !can(user, "reports:export")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const url = new URL(req.url);
   const sp = Object.fromEntries(url.searchParams.entries());
-  const table = await def.run(parseReportFilters(sp));
+  const result = await def.run(parseReportFilters(sp));
+  const table = result.tables[Number(sp.table ?? 0)] ?? result.tables[0];
   await audit({ userId: user.id, ip: await clientIp() }, { entity: "Report", entityId: report, action: "export", after: { format: sp.format ?? "csv", filters: sp, rows: table.rows.length } });
   const base = `citrineland-${report}-${manilaDateKey()}`;
   if (sp.format === "xlsx") {
-    return new NextResponse(new Uint8Array(await toXlsx(table)), {
+    return new NextResponse(new Uint8Array(await toXlsx(result.tables)), {
       headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="${base}.xlsx"` },
     });
   }

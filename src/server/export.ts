@@ -30,13 +30,17 @@ export function toCsv(t: ReportTable): string {
   return "﻿" + [head, ...lines].join("\r\n");
 }
 
-export async function toXlsx(t: ReportTable): Promise<Buffer> {
+export async function toXlsx(input: ReportTable | ReportTable[]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Citrineland CRM";
-  const ws = wb.addWorksheet(t.title.slice(0, 31));
+  for (const t of Array.isArray(input) ? input : [input]) addSheet(wb, t);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+function addSheet(wb: ExcelJS.Workbook, t: ReportTable) {
+  const ws = wb.addWorksheet(t.title.replace(/[\\/?*[\]:]/g, " ").slice(0, 31));
   ws.columns = t.columns.map((c) => ({ header: c.label, key: c.key, width: Math.max(12, c.label.length + 4), style: c.type === "money" ? { numFmt: '"₱"#,##0.00' } : c.type === "pct" ? { numFmt: "0.0" } : {} }));
   ws.getRow(1).font = { bold: true };
   for (const r of t.rows) ws.addRow(Object.fromEntries(t.columns.map((c) => [c.key, cell(r[c.key], c.type)])));
   ws.views = [{ state: "frozen", ySplit: 1 }];
-  return Buffer.from(await wb.xlsx.writeBuffer());
 }

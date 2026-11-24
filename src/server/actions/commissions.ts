@@ -5,8 +5,9 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { action } from "@/lib/action";
 import { audit } from "@/lib/audit";
-import { commissionRuleSchema, commissionAdjustmentSchema, trancheActionSchema } from "@/lib/validation/schemas";
+import { commissionRuleSchema, commissionAdjustmentSchema, trancheActionSchema, quotaSchema } from "@/lib/validation/schemas";
 import { approveTranches, releaseTranches, addAdjustment } from "@/server/commissions";
+import { DomainError } from "@/domain/errors";
 
 export const approve = action("commissions:approve", trancheActionSchema, async ({ trancheIds }, ctx) => {
   const n = await approveTranches(trancheIds, ctx);
@@ -50,4 +51,35 @@ export const deleteCommissionRule = action("commissions:manage_rules", z.object(
   await audit(ctx, { entity: "CommissionRule", entityId: id, action: used ? "deactivate" : "delete", before });
   revalidatePath("/admin/commission-rules");
   return { ok: true as const, message: used ? "Rule is in use — deactivated" : "Rule deleted" };
+});
+
+
+export const saveQuota = action("quotas:manage", quotaSchema, async (input, ctx) => {
+  const { id, value, ...rest } = input;
+  if (rest.targetType === "STAFF" && !rest.userId) throw new DomainError("Select the staff member.");
+  if (rest.targetType === "BROKER" && !rest.brokerId) throw new DomainError("Select the broker.");
+  if (rest.targetType === "BROKERAGE" && !rest.brokerageId) throw new DomainError("Select the brokerage.");
+  if (rest.units == null && value == null) throw new DomainError("Enter a units and/or value target.");
+  const d = rest.periodStart;
+  const periodStart = new Date(Date.UTC(d.getUTCFullYear(), rest.periodType === "QUARTER" ? Math.floor(d.getUTCMonth() / 3) * 3 : d.getUTCMonth(), 1));
+  const data = {
+    ...rest,
+    periodStart,
+    userId: rest.targetType === "STAFF" ? rest.userId : null,
+    brokerId: rest.targetType === "BROKER" ? rest.brokerId : null,
+    brokerageId: rest.targetType === "BROKERAGE" ? rest.brokerageId : null,
+    valueCents: value != null ? BigInt(value) : null,
+  };
+  if (id) await prisma.quota.update({ where: { id }, data });
+  else await prisma.quota.create({ data: { ...data, createdById: ctx.userId } });
+  await audit(ctx, { entity: "Quota", entityId: id ?? "new", action: id ? "update" : "create", after: data });
+  revalidatePath("/admin/quotas");
+  return { ok: true as const, message: "Quota saved" };
+});
+
+export const deleteQuota = action("quotas:manage", z.object({ id: z.string() }), async ({ id }, ctx) => {
+  const q = await prisma.quota.delete({ where: { id } });
+  await audit(ctx, { entity: "Quota", entityId: id, action: "delete", before: q });
+  revalidatePath("/admin/quotas");
+  return { ok: true as const, message: "Quota deleted" };
 });
