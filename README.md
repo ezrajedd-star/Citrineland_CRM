@@ -18,9 +18,33 @@ Internal CRM for **Citrineland**, a Philippine real estate developer selling con
 | Automation & marketing | Built-in automations + rules engine, campaigns (CPL/CPR), email sequences, public CAPTCHA web form |
 | Reports | Role-aware dashboards; sales, funnel, broker, quota, inventory, collections, commissions, marketing — CSV/XLSX |
 
-## Local setup
+## Run it on your computer
 
-Requirements: Node 22+, PostgreSQL 16 (or Docker).
+### Option A — Docker Desktop (easiest, one command)
+
+Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/macOS) and Git, then:
+
+```bash
+git clone https://github.com/ezrajedd-star/Citrineland_CRM.git
+```
+
+```bash
+cd Citrineland_CRM && git checkout claude/eloquent-noether-rhkp5y
+```
+
+```bash
+docker compose -f docker-compose.local.yml up --build
+```
+
+The first build takes 5–10 minutes. When the log shows `Ready`, open http://localhost:3000 and sign in as `admin@citrineland.test` / `ChangeMe!2026` (or `sales.manager@…`, `marketing.manager@…`, `bng.staff@citrineland.test` with the same password). Postgres runs in a container with fictional demo data; the background worker runs inside the app. Stop with Ctrl+C. Next time, `docker compose -f docker-compose.local.yml up` starts in seconds. To wipe all data and start fresh, add `down -v`:
+
+```bash
+docker compose -f docker-compose.local.yml down -v
+```
+
+### Option B — Node.js + PostgreSQL (for coding on it)
+
+Requirements: Node 22+, PostgreSQL 16.
 
 ```bash
 npm install
