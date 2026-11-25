@@ -1433,3 +1433,12 @@ model AutomationLog {
 
   @@index([ruleId, createdAt])
 }
+
+/// File bytes when STORAGE_DRIVER=database (free-tier hosting without object storage). Production uses Spaces.
+model StoredFile {
+  key         String   @id
+  contentType String
+  size        Int
+  data        Bytes
+  createdAt   DateTime @default(now())
+}

@@ -1,0 +1,49 @@
+# Render Blueprint — free demo hosting (no credit card).
+# Database: Neon free Postgres (set DATABASE_URL). Files: stored in Postgres. Worker: runs inside the web process.
+# See docs/FREE_HOSTING.md. Do NOT put real client data on the free tier.
+services:
+  - type: web
+    name: citrineland-crm
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh scripts/start-web.sh
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # ── Required: paste from Neon (direct connection string, with ?sslmode=require) ──
+      - key: DATABASE_URL
+        sync: false
+      # ── Required: password for the Admin and (in demo mode) the three demo role users ──
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        value: admin@citrineland.test
+      # ── Generated secrets ──
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      # ── Free-tier mode ──
+      - key: RUN_WORKER_IN_WEB
+        value: "true"
+      - key: STORAGE_DRIVER
+        value: database
+      - key: SEED_ON_START
+        value: "true"
+      - key: SEED_DEMO
+        value: "true"
+      - key: DEMO_PASSWORD_LOGIN
+        value: "true"
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=384
+      - key: LOG_LEVEL
+        value: info
+      # ── Optional: Microsoft 365 SSO/Outlook (add the Render URL as a redirect URI first) ──
+      - key: AUTH_MICROSOFT_ENTRA_ID_ID
+        sync: false
+      - key: AUTH_MICROSOFT_ENTRA_ID_SECRET
+        sync: false
+      - key: AUTH_MICROSOFT_ENTRA_ID_ISSUER
+        sync: false

@@ -56,6 +56,10 @@ Open http://localhost:3000 and sign in with `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP
 
 The seed (`SEED_DEMO=true`, default) creates obviously fictional data: the bootstrap Admin, one user per role (`sales.manager@citrineland.test`, `marketing.manager@citrineland.test`, `bng.staff@citrineland.test` — with `DEMO_PASSWORD_LOGIN=true` they sign in with the bootstrap password), two developments (a 10-floor × 8-unit condo tower with 60 parking slots, and a 4-block × 20-lot subdivision), price lists, payment schemes, 3 brokerages with 10 brokers (one PRC license expiring within 30 days), ~40 leads across all stages, 10 transactions in various statuses with payments and commission tranches, campaigns, a sequence, pipeline stages, document checklist and automations.
 
+### Free hosting for demos (Render + Neon)
+
+To show the CRM to stakeholders before paying for infrastructure, deploy it free with the included `render.yaml` blueprint and a Neon Postgres database: [`docs/FREE_HOSTING.md`](docs/FREE_HOSTING.md). The same code runs in production; only environment variables change.
+
 ### Docker Compose
 
 ```bash
@@ -105,5 +109,6 @@ docs/                DECISIONS, MICROSOFT_SETUP, DEPLOYMENT, NETSUITE_INTEGRATIO
 
 - [`docs/DECISIONS.md`](docs/DECISIONS.md) — decisions taken where the spec was ambiguous
 - [`docs/MICROSOFT_SETUP.md`](docs/MICROSOFT_SETUP.md) — Entra ID / Graph setup
+- [`docs/FREE_HOSTING.md`](docs/FREE_HOSTING.md) — free demo hosting on Render + Neon (no credit card)
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — DigitalOcean Droplet deployment, backups & restore
 - [`docs/NETSUITE_INTEGRATION_PLAN.md`](docs/NETSUITE_INTEGRATION_PLAN.md) — deferred accounting integration

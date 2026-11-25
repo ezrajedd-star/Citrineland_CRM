@@ -5,7 +5,7 @@ let boss: PgBoss | null = null;
 /** Shared pg-boss instance (used by the worker, and by the web app to enqueue jobs). */
 export async function getBoss(): Promise<PgBoss> {
   if (boss) return boss;
-  const isWorker = process.env.SERVICE_NAME === "worker" || process.argv.some((a) => a.includes("worker"));
+  const isWorker = process.env.SERVICE_NAME === "worker" || process.env.RUN_WORKER_IN_WEB === "true" || process.argv.some((a) => a.includes("worker"));
   const b = new PgBoss({
     connectionString: process.env.DATABASE_URL!,
     schema: "pgboss",

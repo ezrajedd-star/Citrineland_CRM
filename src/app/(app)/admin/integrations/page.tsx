@@ -55,7 +55,7 @@ export default async function IntegrationsPage() {
             <CardTitle>File storage</CardTitle>
           </CardHeader>
           <CardContent className="text-sm">
-            {storageMode === "spaces" ? <Badge variant="success">DigitalOcean Spaces</Badge> : <Badge variant="warning">Local disk (dev only)</Badge>}
+            {storageMode === "spaces" ? <Badge variant="success">DigitalOcean Spaces</Badge> : storageMode === "database" ? <Badge variant="warning">Database (free-tier demo)</Badge> : <Badge variant="warning">Local disk (dev only)</Badge>}
           </CardContent>
         </Card>
       </div>

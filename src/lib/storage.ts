@@ -3,12 +3,20 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { prisma } from "./db";
 
 /**
- * File storage on DigitalOcean Spaces (S3-compatible). Files are private; downloads use short-lived signed URLs.
- * If SPACES_KEY is not configured (local dev), files go to LOCAL_UPLOAD_DIR (default ./.uploads).
+ * File storage. Drivers (STORAGE_DRIVER):
+ *  - "spaces"   DigitalOcean Spaces / any S3-compatible bucket (production). Private objects, short-lived signed URLs.
+ *  - "database" bytes in the StoredFile table — for free hosting with no object storage and an ephemeral disk.
+ *  - "local"    LOCAL_UPLOAD_DIR (default ./.uploads) — local development only.
+ * Default: "spaces" when SPACES_KEY/SECRET/BUCKET are set, otherwise "local".
  */
-const useSpaces = Boolean(process.env.SPACES_KEY && process.env.SPACES_SECRET && process.env.SPACES_BUCKET);
+const spacesConfigured = Boolean(process.env.SPACES_KEY && process.env.SPACES_SECRET && process.env.SPACES_BUCKET);
+const driver = ((process.env.STORAGE_DRIVER || undefined) as "spaces" | "database" | "local" | undefined) ?? (spacesConfigured ? "spaces" : "local");
+const useSpaces = driver === "spaces";
+const useDb = driver === "database";
+if (useSpaces && !spacesConfigured) throw new Error("STORAGE_DRIVER=spaces requires SPACES_KEY, SPACES_SECRET and SPACES_BUCKET");
 const localDir = process.env.LOCAL_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
 
 let client: S3Client | null = null;
@@ -49,6 +57,10 @@ export async function putObject(key: string, body: Buffer, contentType: string) 
     await s3().send(new PutObjectCommand({ Bucket: process.env.SPACES_BUCKET, Key: key, Body: body, ContentType: contentType, ACL: "private" }));
     return;
   }
+  if (useDb) {
+    await prisma.storedFile.create({ data: { key, contentType, size: body.length, data: new Uint8Array(body) } });
+    return;
+  }
   const full = path.join(localDir, key);
   await fs.mkdir(path.dirname(full), { recursive: true });
   await fs.writeFile(full, body);
@@ -64,7 +76,13 @@ export async function signedDownloadUrl(key: string, fileName: string, expiresIn
   );
 }
 
+/** Read bytes for the non-Spaces drivers (database or local disk). */
 export async function readLocal(key: string): Promise<Buffer> {
+  if (useDb) {
+    const f = await prisma.storedFile.findUnique({ where: { key } });
+    if (!f) throw new Error("File not found");
+    return Buffer.from(f.data);
+  }
   const full = path.resolve(localDir, key);
   if (!full.startsWith(path.resolve(localDir))) throw new Error("Invalid key");
   return fs.readFile(full);
@@ -72,7 +90,8 @@ export async function readLocal(key: string): Promise<Buffer> {
 
 export async function deleteObject(key: string) {
   if (useSpaces) await s3().send(new DeleteObjectCommand({ Bucket: process.env.SPACES_BUCKET, Key: key }));
+  else if (useDb) await prisma.storedFile.deleteMany({ where: { key } });
   else await fs.rm(path.join(localDir, key), { force: true });
 }
 
-export const storageMode = useSpaces ? "spaces" : "local";
+export const storageMode = driver;
